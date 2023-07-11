@@ -1,5 +1,7 @@
 ### Hi there 👋
 
+My name is Edan and I am on my Data Analysis journey! I have finished the Google Certificate Data Analysis course on Coursera and am looking to join the workforce as a Data Analyst.
+
 <!--
 **edanchenzion/edanchenzion** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
