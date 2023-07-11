@@ -1,0 +1,251 @@
+---
+title: "An Analysis of the Top 1000 Rated Movies"
+author: "Edan Chen-Zion"
+date: "07-11-2023"
+output: html_document
+---
+
+# Predicting Movie Magic: An Analysis of the Top 1000 Rated Movies
+
+For the capstone of the Google Data Analytics course, I put myself in the shoes of a data analyst at a movie production studio. The business question I decided to tackle was "What movie should we make if we want it to be listed as one of the Top 1000 movies of all time?" Specifically, I will be answering what rating should it have (G, PG, PG-13, or R), who should direct it, and what genre(s) should it be?
+  
+To answer these questions, I used a scraped data set from IMDB.com that I downloaded from a Kaggle notebook [here](https://www.kaggle.com/datasets/harshitshankhdhar/imdb-dataset-of-top-1000-movies-and-tv-shows).
+
+## Setting Up the Environment
+
+For this data set, I started by setting up the "tidyverse" and "janitor" packages.
+
+```{r setup, include=FALSE}
+install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+install.packages("janitor", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+library(janitor)
+```
+
+## Cleaning the Data
+
+After uploading the data set, I cleaned it and ensured that all columns were the proper data type. I also got rid of the first column with poster links since that was not needed.
+
+```{r upload and clean}
+#read Top 1000 movie list
+top_movies <- read_csv("imdb_top_1000.csv")
+
+#clean column names
+top_movies_col_clean <- clean_names(top_movies)
+
+#clean columns
+top_movies_pass1 <- top_movies_col_clean %>% 
+  select(!c("poster_link")) %>%
+  mutate(released_year = as.numeric(released_year)) %>% 
+  mutate(runtime = as.numeric(substring(runtime, 1, nchar(runtime)-4)))
+```
+
+## Standardizing the "certificate" Column
+
+After reviewing columns, I noticed that the "certificate" column had ratings with which I was unfamiliar. I found that the non-American ratings were from the Indian certificate system. Since the American system had both "G" and "PG" for kids while the Indian system had just "U", I decided to standardize the column to the Indian system as shown in the code below:
+
+```{r ratings column}
+#grab certificate column and make new vector with proper values
+rating <- top_movies_pass1$certificate
+new_rate <- c() #run with "for" loop
+for(a in rating){
+  if(is.na(a) || a == "16" || a == "NA" || a == "Unrated"){
+    new_rate <- c(new_rate, "Unrated")
+  }else if(a == "R" || a == "TV-MA" || a == "A"){
+    new_rate <- c(new_rate, "A")
+  }else if(a == "PG-13" || a == "TV-14" || a == "UA" || a == "U/A"){
+    new_rate <- c(new_rate, "U/A")
+  }else{
+    new_rate <- c(new_rate, "U")
+  }
+}
+
+top_movies_pass1$certificate <- new_rate
+top_movies_clean <- cbind(rank = c(1:1000), top_movies_pass1) #labels 1-1000
+```
+
+After adding a "rank" column to connect the movies to their proper rank, I was ready to begin analyzing.
+
+## What Rating Should It Be?
+
+My first question was, "What rating/certificate should our movie have?" Now that the certificates were standardized, the first thing I looked at was which showed up the most often in the list. Below are the same graph, once labeled for the American Rating System and once for the Indian Certificate System. After this graph I will be showing results in just the American Rating System.
+
+```{r certificate bar graph, echo=FALSE}
+ggplot(top_movies_clean) + 
+  geom_bar(mapping = aes(x = certificate, fill = certificate)) +
+  labs(title = "Ratings in the Top 1000 Movies", subtitle = "American Rating System", x = "Rating", y = "") +
+  scale_x_discrete(labels = c("R", "G/PG", "PG-13", "Unrated")) + 
+  guides(fill = "none") +
+  theme_minimal()
+
+ggplot(top_movies_clean) + 
+  geom_bar(mapping = aes(x = certificate, fill = certificate)) +
+  labs(title = "Ratings in the Top 1000 Movies", subtitle = "Indian Certificate System", x = "Certificate", y = "") +
+  scale_x_discrete(labels = c("A", "U", "U/A", "Unrated")) + 
+  guides(fill = "none") +
+  theme_minimal()
+```
+
+More important than the pure number of each rating, though, is looking at the ratings over time. I wanted to note, as you'll see on the graphs, that the "PG-13" ranking was not established until 1984.
+
+```{r rating over time, echo=FALSE}
+cert.labs <- c("R", "G/PG", "PG-13", "Unrated")
+names(cert.labs) <- c("A", "U", "U/A", "Unrated")
+ggplot(top_movies_clean) + 
+  geom_histogram(mapping = aes(x = released_year, fill = certificate), binwidth = 1) +
+  facet_grid(row = vars(certificate), labeller = labeller(certificate = cert.labs)) + 
+  labs(x = "Released Year", y = "") +
+  annotate("rect", xmin = 1983.8, xmax = 1984.2, ymin = 0, ymax = 14) +
+  annotate("text", x = 1970, y = 11, label = "1984: PG-13 established", size = 2.5) + 
+  coord_cartesian(ylim = c(0, 13)) +
+  guides(fill = "none") + 
+  theme_minimal()
+```
+
+After the establishment of the PG-13 rating system, movies added into the list of top 1000 movies were increasingly rated PG-13, while the number of G/PG movies stagnated and now seem to be dropping in number per year. This suggests we remove the "G/PG" rating as suggestion since we are looking for the most successful option. Zooming into the years since the establishment of PG-13 and filtering to either "R" or "PG-13" we see the following:
+
+```{r R vs. PG-13, echo=FALSE}
+trm_a <- top_movies_clean %>% 
+  filter(released_year >= 1984, certificate == "A") %>% 
+  group_by(released_year) %>% 
+  summarize(count = n()) %>% 
+  mutate(rating = "R")
+trm_ua <- top_movies_clean %>% 
+  filter(released_year >= 1984, certificate == "U/A") %>% 
+  group_by(released_year) %>% 
+  summarize(count = n()) %>% 
+  mutate(rating = "PG-13") 
+trm_aua <- rbind(trm_a, trm_ua)
+ggplot() + 
+  geom_line(trm_aua, mapping = aes(x = released_year, y = count, color = rating)) +
+  labs(x = "Released Year", y = "", fill = "Rating", 
+       title = "Number of Movies in Top 1000 from Each Year") +
+  theme_minimal()
+```
+
+We can see that since 2010, the number of PG-13 movies that were put in the Top 1000 Movies list were either greater than or equal to the number of R movies. That is why my recommendation is to make a PG-13 movie.
+
+## Who Should the Director Be?
+
+To find a director for this film, we would ideally want someone who has repeatedly made PG-13 movies that ended up in the Top 1000. Additionally, given the trend toward PG-13 movies in the last decade, we would want this director's most recent film to have been made during or after 2010.
+
+```{r finding the director}
+top_directors <- top_movies_clean %>% 
+  filter(certificate == "U/A") %>% 
+  select(director, rank, released_year) %>% 
+  group_by(director) %>% 
+  summarize(num = n(), best_rank = min(rank), last_movie = max(released_year)) %>% 
+  filter(last_movie >= 2010) %>% 
+  select(-last_movie) %>% 
+  arrange(desc(num), best_rank) %>% 
+  print(n = 10)
+```
+
+While we can just read the tibble to find our possible directors, the chart below narrows the search down to repeatedly successful PG-13 directors with 3 or more movies in the Top 1000. In addition, it shows what rank their most highly ranked movie is.
+
+```{r directors bar graph, echo=FALSE}
+top_directors %>% 
+  filter(num > 2) %>% 
+ggplot(aes(x = reorder(reorder(director, -best_rank), num), y = num)) +
+  geom_col() +
+  scale_y_continuous(expand = expansion(mult = 0, add = 0)) +
+  labs(x = "Directors", y = "Number of PG-13 Movies") +
+  geom_text(aes(label = paste("Best Rank:", best_rank)), hjust=1.05, color="white", size=3.5)+
+  theme_minimal() +
+  coord_flip()
+```
+
+What we find is that my top suggestion for a director for this movie is Christopher Nolan due to his successes both in the number of PG-13 movies he's made in the top 1000 along with how well his best ranked movie placed. Should Mr. Nolan be unavailable, my following recommendations would continue down the graph.
+
+## What Genre(s) Should It Be?
+
+Movies are often more than just one genre, and this reflects in the data set I am using. I once again used movies made on or after 2010, counting how many genres each movie has listed. I then found the distribution of the amount of genres these movies have.
+
+```{r number of genres, echo=FALSE}
+top_movie_2010 <- top_movies_clean %>% 
+  filter(released_year >= 2010)
+top_movie_genres <- top_movie_2010$genre
+
+top_movie_genres_split <- strsplit(top_movie_genres, ", ") #split vector into list of vectors
+
+genre_num <- c()
+for(a in 1:length(top_movie_genres_split)){
+  genre_num[a] = length(top_movie_genres_split[[a]])
+}
+genre_time <- data.frame(genre_num)
+
+ggplot() +
+  geom_histogram(genre_time, mapping = aes(x = genre_num), binwidth = 1) +
+  labs(x = "Number of Genres", y = "") +
+  theme_minimal()
+```
+
+We find that it is most common to have 3 genres for the more recent Top 1000 movies. To find the most common genre, we can then compare the previously made lists of genres per movie to IMDB's official list of genres to find which appears most often:
+
+```{r genre breakdown, echo=FALSE}
+genre_list <- c("Action", "Adventure", "Animation", "Biography", "Comedy", "Crime",
+                "Documentary", "Drama", "Family", "Fantasy", "Film-Noir", "History", 
+                "Horror", "Music", "Musical", "Mystery", "Romance", "Sci-Fi",
+                "Short", "Sport", "Thriller", "War", "Western") #list by IMDB
+top_movie_2010 <- top_movies_clean %>% 
+  filter(released_year >= 2010)
+top_movie_genres <- top_movie_2010$genre
+
+top_movie_genres_split <- strsplit(top_movie_genres, ", ") #split vector into list of vectors
+
+genre_count <- rep(0, times = length(genre_list)) #count for each genre
+for(x in 1:length(genre_list)){
+  for(y in 1:length(top_movie_genres_split)){
+    if(genre_list[x] %in% top_movie_genres_split[[y]]){
+      genre_count[x] = genre_count[x] + 1
+    }
+ }
+}
+
+#Make data frame out of genres and counts
+top_movies_genres_count <- data.frame(genres = genre_list, count = genre_count)
+
+#Filter out genres that don't show then graph
+top_movies_genres_count %>% 
+  filter(count > 0) %>% 
+ggplot(aes(x = reorder(genres, +count), y = count/length(top_movie_genres_split))) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent, 
+                     expand = expansion(mult = 0)) +
+  labs(x = "Genres", y = "", title = "% of Top 1000 Movies since 2010") +
+  theme_minimal() +
+  coord_flip()
+```
+
+With this and the previous graph, my suggestion would be to make a Drama. To figure out the other two genres should be, I filtered for each trio of either Drama/Comedy/Action, Drama/Comedy/Adventure, or Drama/Action/Adventure.
+
+```{r drama groups}
+top_movies_clean %>% 
+  filter(released_year >= 2010, grepl("Drama", genre), grepl("Comedy", genre), grepl("Action", genre)) %>% 
+  summarize(Drama_Comedy_Action = n())
+top_movies_clean %>% 
+  filter(released_year >= 2010, grepl("Drama", genre), grepl("Comedy", genre), grepl("Adventure", genre)) %>% 
+  summarize(Drama_Comedy_Adventure = n())
+top_movies_clean %>% 
+  filter(released_year >= 2010, grepl("Drama", genre), grepl("Adventure", genre), grepl("Action", genre)) %>% 
+  summarize(Drama_Action_Adventure = n())
+```
+
+From this we can see that no Drama/Comedy/Action movies exist, while similar numbers of Drama/Comedy/Adventure and Drama/Action/Adventure movies exist. To decide between the two, we can use my suggestion for director to see if he has ever made a movie that included Comedy or Action:
+
+```{r director filter}
+#Has he made a Comedy movie?
+top_movies_clean %>% 
+  filter(director == "Christopher Nolan", grepl("Comedy", genre)) %>% 
+  select(series_title, genre)
+#Has he made an Action movie?
+top_movies_clean %>% 
+  filter(director == "Christopher Nolan", grepl("Action", genre)) %>% 
+  select(series_title, genre)
+```
+
+We can see that while he's never made a comedy, Christopher Nolan has made several Action movies, 3 of which pair with Adventure. With this, my recommendation for genre is a Drama/Action/Adventure.
+
+## Final Recommendation
+
+My final recommendation is that, for this movie to make a Top 1000 Movie, they should make a PG-13 movie directed by Christopher Nolan that is a Drama/Action/Adventure film. And while this exercise was theoretical, I would still suggest keeping your eye out, because if Christopher Nolan announces work on a PG-13 rated Drama/Action/Adventure, my bet is that it will end up becoming a Top 1000 Movie.
